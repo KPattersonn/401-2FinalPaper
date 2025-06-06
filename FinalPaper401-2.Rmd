@@ -1,0 +1,476 @@
+---
+title: "FinalStats401-2"
+author: "Kennedy Patterson"
+date: "2025-06-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# loading packages
+library(tidyverse)
+library(haven)
+library(modelsummary)
+library(marginaleffects)
+library(estimatr)
+library (lmtest)
+library(car)
+library(MASS)
+library(gofcat) 
+library(nnet) 
+library(dplyr)
+```
+
+
+
+```{r}
+# Loading in working data set
+library(readr)
+DeathData08_24 <- read_csv("/Users/kennedypatterson/Desktop/401-2 Final Paper/DeathDataNew08_24.csv")
+View(DeathData08_24)
+
+# Turning my "Race/Ethnicity" variable into a factor
+
+race_factor <- as.factor(DeathData08_24$"Race/Ethnicity") 
+
+# Re leveling my race_factor, making "White" the reference category 
+
+race_factor <- relevel(race_factor, ref = "White")
+
+# Turning my "RSex" variable into a factor
+
+sex_factor <- as.factor(DeathData08_24$Sex)   
+
+# Re leveling my race_factor, making Male the reference category 
+
+DeathData08_24$sex_factor <- relevel(sex_factor, ref = "Male")
+
+# Creating a variable to represent a Drug-and-Alcohol-induced deaths with 1 and 0. 1 represents Drug-and-Alcohol-induced death and 0 doesnt 
+DeathData08_24$DrugAlcoholDeath <- ifelse(
+ DeathData08_24$ParentCategory == "Drug-and-Alcohol-induced", 
+  1, 
+  0
+)
+
+# Creating a variable to represent a Homicides with 1 and 0. 1 represents Homicide death and 0 doesnt 
+DeathData08_24$HomicideDeath <- ifelse(
+  DeathData08_24$ParentCategory == "Homicide", 
+  1, 
+  0
+)
+
+# Creating a variable to represent a Natural death with 1 and 0. 1 represents Natural death and 0 doesnt 
+DeathData08_24$NaturalCauses <- ifelse(
+  DeathData08_24$ParentCategory == "Natural Causes", 
+  1, 
+  0
+)
+
+# cleaning data by removing unknowns
+DeathData08_24 <- DeathData08_24 %>%
+  filter(`Race/Ethnicity` != "Unknown", Sex != "Unknown", Age != "Unknown")
+
+DeathData08_24 <- DeathData08_24 %>% drop_na(`Race/Ethnicity`, Age, Sex)
+
+DeathData08_24 <- DeathData08_24 %>%
+  filter(Sex != "na")
+
+# collapsing my month variable into 3 seasonal categories 
+DeathData08_24 <- DeathData08_24 %>%
+  mutate(Season = case_when(
+    Month %in% c(3, 4, 5, 9, 10, 11)   ~ "Spring/Fall",
+    Month %in% c(6, 7, 8)   ~ "Summer",
+     Month %in% c(12, 1, 2)  ~ "Winter",
+    TRUE                   ~ NA_character_
+  ))
+
+
+# creating ordinal variable for year across 3 year periods
+DeathData08_24$YearPeriod <- dplyr::case_when(
+DeathData08_24$Year >= 2008 & DeathData08_24$Year <= 2018 ~ "Pre-COVID",
+  DeathData08_24$Year >= 2019 & DeathData08_24$Year <= 2021 ~ "COVID",
+  DeathData08_24$Year >= 2022 & DeathData08_24$Year <= 2024 ~ "Post-COVID"
+)
+
+# Convert to ordered factor
+DeathData08_24$YearPeriod <- factor(DeathData08_24$YearPeriod, 
+                                 levels = c("Pre-COVID", "COVID", "Post-COVID"), 
+                                 ordered = TRUE)
+
+# creating ordinal variable for age
+
+DeathData08_24$AgeGroup <- dplyr::case_when(
+  DeathData08_24$Age >= 0 & DeathData08_24$Age <= 17 ~ "Child/Youth",
+  DeathData08_24$Age >= 18 & DeathData08_24$Age <= 29 ~ "Young Adult",
+  DeathData08_24$Age >= 30 & DeathData08_24$Age <= 49 ~ "Adult",
+  DeathData08_24$Age >= 50 & DeathData08_24$Age <= 64 ~ "Older Adult",
+  DeathData08_24$Age >= 65 & DeathData08_24$Age <= 82 ~ "Senior"
+)
+
+# Convert to ordered factor
+DeathData08_24$AgeGroup <- factor(DeathData08_24$AgeGroup,
+                                levels = c("Child/Youth", "Young Adult", "Adult", "Older Adult", "Senior"),
+                                ordered = TRUE)
+
+DeathData08_24$RaceEthnicity <- trimws(DeathData08_24$`Race/Ethnicity`)
+
+# Convert to a factor
+DeathData08_24$RaceEthnicity <- factor(DeathData08_24$RaceEthnicity)
+
+#Seting "White" as the reference category for my RaceEthnicity variable
+DeathData08_24$RaceEthnicity <- relevel(DeathData08_24$RaceEthnicity, ref = "White")
+
+#Reading in income and zip data
+income_zip <- read_csv("/Users/kennedypatterson/Desktop/Linear Regression Proj/R13832636_SL860.csv")
+head(income_zip)
+
+# Renaming the column names in the income_zip_dataset race 
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_001"] <- "TotalPop"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_002"] <- "White"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_003"] <- "Black"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_004"] <- "American_Indian_Alaskan_Native"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_005"] <- "Asian"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_006"] <- "Native_Hawaiian_OtherPI"
+
+# Calculate the percentage of each race group relative to the total population
+income_zip$Native_Hawaiian_PI_percent <- (income_zip$Native_Hawaiian_OtherPI / income_zip$TotalPop) * 100
+income_zip$Asian_percent <- (income_zip$Asian / income_zip$TotalPop) * 100
+income_zip$American_Indian_Alaska_Native_percent <- (income_zip$American_Indian_Alaskan_Native / income_zip$TotalPop) * 100
+income_zip$Black_percent <- (income_zip$Black / income_zip$TotalPop) * 100
+income_zip$White_percent <- (income_zip$White / income_zip$TotalPop) * 100
+
+#renaming Geo_QName column in the income zip dataset
+colnames(income_zip)[colnames(income_zip) == "Geo_QName"] <- "ZIP"
+
+# Deriving the zipcode from income_zip data by extracting the last 5 digits from the 'GEO_ID' column
+income_zip$ZIP <- sub(".*(\\d{5})$", "\\1", income_zip$ZIP)
+
+# calling dataset
+head(DeathData08_24)
+``` 
+
+```{r}
+#Reading in income and zip data
+income_zip <- read_csv("/Users/kennedypatterson/Desktop/Linear Regression Proj/R13832636_SL860.csv")
+
+
+# Renaming the column names in the income_zip_dataset race 
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_001"] <- "TotalPop"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_002"] <- "White"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_003"] <- "Black"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_004"] <- "American_Indian_Alaskan_Native"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_005"] <- "Asian"
+colnames(income_zip)[colnames(income_zip) == "SE_A03001_006"] <- "Native_Hawaiian_OtherPI"
+
+# Calculate the percentage of each race group relative to the total population
+income_zip$Native_Hawaiian_PI_percent <- (income_zip$Native_Hawaiian_OtherPI / income_zip$TotalPop) * 100
+income_zip$Asian_percent <- (income_zip$Asian / income_zip$TotalPop) * 100
+income_zip$American_Indian_Alaska_Native_percent <- (income_zip$American_Indian_Alaskan_Native / income_zip$TotalPop) * 100
+income_zip$Black_percent <- (income_zip$Black / income_zip$TotalPop) * 100
+income_zip$White_percent <- (income_zip$White / income_zip$TotalPop) * 100
+
+#renaming Geo_QName column in the income zip dataset
+colnames(income_zip)[colnames(income_zip) == "Geo_QName"] <- "ZIP"
+
+# Deriving the zipcode from income_zip data by extracting the last 5 digits from the 'GEO_ID' column
+income_zip$ZIP <- sub(".*(\\d{5})$", "\\1", income_zip$ZIP)
+
+# renaming Geo_QName column in the income zip dataset
+colnames(income_zip)[colnames(income_zip) == "Geo_QName"] <- "ZIP"
+
+# Deriving the zipcode from income_zip data by extracting the last 5 digits from the 'GEO_ID' column
+income_zip$ZIP <- sub(".*(\\d{5})$", "\\1", income_zip$ZIP)
+
+# calling dataset
+head(income_zip)
+
+# What share of all unhoused deaths are from each racial group
+race_share <- DeathData08_24 %>%
+  group_by(RaceEthnicity) %>%
+  summarise(TotalRaceDeaths = n()) %>%
+  mutate(ShareOfAllDeaths = TotalRaceDeaths / sum(TotalRaceDeaths))
+ 
+#calling dataset
+race_share
+
+
+```
+ 
+likelhood of homicide ... explanatory power....
+```{r}
+
+# Recoding Race/Ethnicity to set White as the reference level
+DeathData08_24$`Race/Ethnicity` <- relevel(factor(DeathData08_24$`Race/Ethnicity`), ref = "White") 
+
+
+# Model logit model with interactions
+interact.model <- glm(
+  HomicideDeath ~ `Race/Ethnicity` + sex_factor + sex_factor * `Race/Ethnicity`, 
+  family = binomial(link = "logit"), 
+  data = DeathData08_24
+)
+
+# Collapsing race variable
+DeathData08_24$RaceCollapsed <- ifelse(DeathData08_24$`Race/Ethnicity` == "White", "White", "POC")
+DeathData08_24$RaceCollapsed <- factor(DeathData08_24$RaceCollapsed, levels = c("White", "POC"))
+
+# logit model with collasped interactions
+interact.model3 <- glm(HomicideDeath ~ RaceCollapsed + sex_factor + sex_factor*RaceCollapsed, 
+                      family = binomial(link = "logit"), 
+                      data = DeathData08_24)
+
+# Defining variable names
+var_names1 <- c(
+  "(Intercept)" = "Intercept",
+  "RaceCollapsedPOC" = "People of Color",
+  "sex_factorFemale" = "Women",
+  "RaceCollapsedPOC:sex_factorFemale" = "Women of Color",
+  "`Race/Ethnicity`Black/African American" = "Black/African American",      
+  "`Race/Ethnicity`Hispanic" = "Hispanic",                      
+  "`Race/Ethnicity`Mixed/Other" = "Mixed/Other",                   
+  "`Race/Ethnicity`Pacific Islander" = "Pacific Islander",
+  "`Race/Ethnicity`American Indian/Alaska Native" = "American Indian/Alaska Native",
+  "`Race/Ethnicity`Black/African American:sex_factorFemale" = "Black/African American Women",
+  "`Race/Ethnicity`Hispanic:sex_factorFemale" = "Hispanic Women",                 
+  "`Race/Ethnicity`American Indian/Alaska Native:sex_factorFemale" = "Mixed/Other Women",           
+ "`Race/Ethnicity`Pacific Islander:sex_factorFemale" = "Pacific Islander Women"
+)
+
+# calculting average perdictions 
+library(marginaleffects)
+
+pred <- avg_predictions(
+  interact.model3, 
+  by = c("RaceCollapsed", "sex_factor"),
+  type = "response"
+)
+# graphing the average perdictions
+library(ggplot2)
+
+ggplot(pred, aes(x = RaceCollapsed, y = estimate, fill = sex_factor)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  labs(
+    y = "Predicted Probability of Homicide Death",
+    title = "Predicted Probability by Race (White vs. POC) and Sex"
+  ) +
+  theme_minimal()
+
+
+modelsummary(
+  list("No Interaction" = interact.model, "Race*Sex Interaction" = interact.model3), 
+  exponentiate = TRUE, 
+  fmt = 4, 
+  stars = TRUE, 
+  title = "Table 1: Logistic Regression Predicting Homicide Deaths",
+  note = "Odds ratios from logistic regression models predicting the likelihood of experiencing a homicide death. The, No Interaction Model includes the main effects for race and sex. The Race/Sex Interaction Model includes an interaction between race and sex. Additionlly, Based on the BIC and AIC calculation, the Race/Sex Interaction Model is perferred",
+  coef_map = var_names1,
+  output = "html"
+)
+
+
+```
+
+
+
+
+```{r}
+# collapsing new race variable
+DeathData08_24$CollapsedRace <- ifelse(
+  DeathData08_24$`Race/Ethnicity` == "Black/African American", 
+  "Black/African American", 
+  "Non-Black"
+)
+
+# factoring my new collapsed race variable
+DeathData08_24$CollapsedRace <- factor(
+  DeathData08_24$CollapsedRace, 
+  levels = c("Non-Black", "Black/African American")
+)
+
+# negative binomial regression model 
+interact.modelnew <- glm(
+  HomicideDeath ~ CollapsedRace + sex_factor + sex_factor * CollapsedRace, 
+  family = binomial(link = "logit"), 
+  data = DeathData08_24
+)
+
+# Defining variable names
+var_names1 <- c(
+  "(Intercept)" = "Intercept",
+  "CollapsedRaceBlack/African American" = "Black/African American (ref = Non-Black)",
+  "sex_factorFemale" = "Female (ref = Male)",
+  "CollapsedRaceBlack/African American:sex_factorFemale" = "Black/African American Female (ref= Non-Black Male)",
+  "`Race/Ethnicity`Black/African American" = "Black/African American",      
+  "`Race/Ethnicity`Hispanic" = "Hispanic",                      
+  "`Race/Ethnicity`Mixed/Other" = "Mixed/Other",                   
+  "`Race/Ethnicity`Pacific Islander" = "Pacific Islander",
+  "`Race/Ethnicity`American Indian/Alaska Native" = "American Indian/Alaska Native",
+  "`Race/Ethnicity`Black/African American:sex_factorFemale" = "Black/African American Women",
+  "`Race/Ethnicity`Hispanic:sex_factorFemale" = "Hispanic Women",                 
+  "`Race/Ethnicity`American Indian/Alaska Native:sex_factorFemale" = "Mixed/Other Women",           
+ "`Race/Ethnicity`Pacific Islander:sex_factorFemale" = "Pacific Islander Women"
+)
+
+# running average predictions 
+library(marginaleffects)
+
+pred <- avg_predictions(
+  interact.modelnew, 
+  by = c("CollapsedRace", "sex_factor"),
+  type = "response"
+)
+# graphing average perdictions 
+library(ggplot2)
+
+ggplot(pred, aes(x = CollapsedRace, y = estimate, fill = sex_factor)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  labs(
+    y = "Predicted Probability of Homicide Death",
+    title = "Predicted Probability by Race (Black vs Non-Black) and Sex"
+  ) +
+  theme_minimal()
+
+#running summary of both models 
+modelsummary(
+  list("No Interaction" = interact.model, "Race*Sex Interaction" = interact.modelnew), 
+  exponentiate = TRUE, 
+  fmt = 4, 
+  stars = TRUE, 
+  title = "Table 1: Logistic Regression Predicting Homicide Deaths",
+  note = "Odds ratios from logistic regression models predicting the likelihood of experiencing a homicide death. The, No Interaction Model includes the main effects for race and sex. The Race/Sex Interaction Model includes an interaction between race and sex. Additionlly, Based on the BIC and AIC calculation, the Race/Sex Interaction Model is perferred",
+  coef_map = var_names1,
+  output = "html"
+)
+```
+
+```{r}
+library(dplyr)
+# summarizing data into a new data set that only inculdes the variables that I am working with
+DeathCounts <- DeathData08_24 %>%
+  group_by(Year, Season, HomicideDeath, AgeGroup, sex_factor, RaceEthnicity, `Manner of Death`) %>%
+  summarise(DeathCount = n(), .groups = "drop")
+
+# adding a death count variable
+DeathCounts <- DeathCounts %>%
+  rename(Manner_of_Death = `Manner of Death`)
+
+# running negative binomal regression model (no interaction)
+neg_model <-  glm.nb(DeathCount ~ Season + HomicideDeath + AgeGroup + sex_factor + RaceEthnicity + Manner_of_Death, 
+                     data = DeathCounts)
+# loading model 
+summary(neg_model)
+
+# # running negative binomal regression model (with interaction)
+neg_model_interaction <-  glm.nb(DeathCount ~ Season + HomicideDeath + AgeGroup + sex_factor*RaceEthnicity + AgeGroup*RaceEthnicity + AgeGroup*sex_factor + Manner_of_Death, 
+                     data = DeathCounts)
+# loading model 
+summary(neg_model_interaction)
+
+# reassigning variable names
+var_names <- c(var_names <- c(
+  "(Intercept)" = "Intercept",
+  "SeasonSummer" = "Summer (ref = fall/spring)",
+  "SeasonWinter" = "Winter (ref = fall/spring)",
+  
+  # Age Groups
+  "AgeGroup.L" = "Young Adult (ref = Child/Youth)",
+  "AgeGroup.Q" = "Adult (ref = Child/Youth)",
+  "AgeGroup.C" = "Older Adult (ref = Child/Youth)",
+  "AgeGroup^4" = "Senior (ref = Child/Youth)",
+
+  # Sex
+  "sex_factorFemale" = "Female (ref = Male)",
+
+  # Race/Ethnicity
+  "RaceEthnicityAmerican Indian/Alaska Native" = "Native American/Alaskan Native (ref = White)",
+  "RaceEthnicityBlack/African American" = "Black (ref = White)",
+  "RaceEthnicityHispanic" = "Hispanic (ref = White)",
+  "RaceEthnicityMixed/Other" = "Mixed/Other (ref = White)",
+  "RaceEthnicityPacific Islander" = "Pacific Islander (ref = White)",
+  "RaceEthnicityAsian" = "Asian (ref = White)",
+
+
+  # Manner of Death 
+  "Manner_of_DeathFetal Death" = "Fetal Death (ref = Accidental)",
+  "Manner_of_DeathHomicide" = "Homicide (ref = Accidental)",
+  "Manner_of_DeathNatural" = "Natural (ref = Accidental)",
+  "Manner_of_DeathSuicide" = "Suicide (ref = Accidental)",
+  "Manner_of_DeathUndetermined" = "Undetermined (ref = Accidental)",
+  
+  # Interactions
+  "sex_factorFemale:RaceEthnicityAmerican Indian/Alaska Native" = "Native American/Alaskan Native Female (ref = White Male)",
+  "sex_factorFemale:RaceEthnicityBlack/African American" = "Black Female (ref = White Male)",
+  "AgeGroup.L:sex_factorFemale" = "Young Adult Female (ref = Young Adult Male)",
+  "AgeGroup.Q:sex_factorFemale" = "Adult Female (ref = Adult Male)",
+  "AgeGroup.C:sex_factorFemale" = "Older Adult Female (ref = Older Adult Male)",
+  "AgeGroup^4:sex_factorFemale" = "Senior Female (ref = Senior Male)"
+)
+)
+
+#running summary of both models 
+  modelsummary(
+  list("No Interaction" = neg_model, "Race*Sex Interaction" = neg_model_interaction), 
+  exponentiate = c(TRUE, TRUE), 
+  fmt = 4, 
+  stars = TRUE, 
+  title = "Table 2: Negative Binomial Regression Models Predicting Unhoused Death Counts",
+  notes = "Note: Incidence rate ratios (IRRs) are reported. IRRs > 1 indicate higher expected death counts; IRRs < 1 indicate lower expected counts. Models assess the influence of Race/Ethnicity, Sex, and their interaction.",
+  coef_map = var_names
+)
+
+  
+# Model negative binomial 
+model_3 <- glm(DeathCount ~ Season + HomicideDeath + AgeGroup + sex_factor + RaceEthnicity + Manner_of_Death, 
+                  family = poisson,
+               data=DeathCounts)
+# running negative binomial model
+summary(model_3)
+
+# comparing the negative binomial model with pisson model 
+lrtest(model_3, neg_model) 
+
+# re running negative binomial model as a clean table
+library(knitr)
+lrt_table <- data.frame(
+  Model = c("Poisson (Model 1)", "Negative Binomial (Model 2)"),
+  Df = c(19, 20),
+  LogLik = c(-2105.3, -1981.1),
+  Delta_Df = c(NA, 1),
+  Chisq = c(NA, 248.26),
+  `p-value` = c(NA, "< 2.2e-16 ***")
+)
+
+# Displaying table
+kable(lrt_table, caption = "Likelihood Ratio Test Comparing Poisson and Negative Binomial Models")
+
+# calculating the variance and mean of outcome variable
+var(DeathCounts$DeathCount) 
+mean(DeathCounts$DeathCount)
+
+# Creating a data frame with the variance and mean of the outcome variable
+summary_var_mean <- data.frame(
+  Statistic = c("Mean of Death Count", "Variance of Death Count"),
+  Value = c(10.54319, 2.332759)
+)
+# running ata frame with the variance and mean of the outcome variable
+kable(summary_var_mean, caption = "Summary Statistics of Death Counts")
+
+
+```
+
+
+```{r}
+#descriptive stastics 
+desc_stats <- summary(DeathCounts)
+
+knitr::kable(desc_stats) %>%
+  kableExtra::kable_styling("striped", full_width = FALSE) 
+
+
+```
+
+
